@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sky Glider</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 18px;
+            background: linear-gradient(#172554, #0f172a);
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .game-container {
+            width: min(100%, 440px);
+            text-align: center;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            margin-bottom: 18px;
+            color: #bfdbfe;
+            font-size: 14px;
+        }
+
+        .game-frame {
+            position: relative;
+            overflow: hidden;
+            border: 3px solid #60a5fa;
+            border-radius: 16px;
+            box-shadow: 0 15px 40px #0005;
+            background: #7dd3fc;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            touch-action: none;
+        }
+
+        .controls {
+            margin-top: 16px;
+            color: #cbd5e1;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .start-button {
+            margin-top: 15px;
+            padding: 13px 28px;
+            border: none;
+            border-radius: 10px;
+            background: #38bdf8;
+            color: #082f49;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .start-button:hover {
+            background: #7dd3fc;
+        }
+    </style>
+</head>
+<body>
+    <main class="game-container">
+        <h1>☁️ Sky Glider</h1>
+        <p class="subtitle">Keep flying. Avoid the pillars. Chase your high score.</p>
+
+        <div class="game-frame">
+            <canvas id="gameCanvas" width="400" height="600"></canvas>
+        </div>
+
+        <button class="start-button" id="startButton">Start Flying</button>
+
+        <p class="controls">
+            Press SPACE, click, or tap to flap upward.<br>
+            Avoid the pillars and don't hit the ground!
+        </p>
+    </main>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const startButton = document.getElementById("startButton");
+
+        const W = canvas.width;
+        const H = canvas.height;
+        const groundHeight = 55;
+
+        const bird = {
+            x: 95,
+            y: 280,
+            radius: 14,
+            velocity: 0,
+            gravity: 0.38,
+            flapStrength: -6.8,
+            rotation: 0
+        };
+
+        let pillars = [];
+        let score = 0;
+        let best = loadBest();
+        let running = false;
+        let started = false;
+        let gameOver = false;
+        let animationId = null;
+        let frame = 0;
+
+        function loadBest() {
+            try {
+                return Number(localStorage.getItem("skyGliderBest")) || 0;
+            } catch {
+                return 0;
+            }
+        }
+
+        function saveBest() {
+            try {
+                localStorage.setItem("skyGliderBest", String(best));
+            } catch {
+                return;
+            }
+        }
+
+        function resetGame() {
+            bird.y = H * 0.42;
+            bird.velocity = 0;
+            bird.rotation = 0;
+
+            pillars = [];
+            score = 0;
+            frame = 0;
+            running = true;
+            started = true;
+            gameOver = false;
+
+            startButton.textContent = "Restart Game";
+            addPillar(W + 30);
+
+            if (animationId !== null) {
+                cancelAnimationFrame(animationId);
+            }
+
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function addPillar(x) {
+            const gap = Math.max(132, 165 - score * 1.2);
+            const margin = 65;
+            const gapY = margin + Math.random() * (H - groundHeight - gap - margin * 2);
+
+            pillars.push({
+                x,
+                width: 62,
+                gapY,
+                gap,
+                scored: false
+            });
+        }
+
+        function flap() {
+            if (!running) {
+                if (!started || gameOver) {
+                    resetGame();
+                }
+                return;
+            }
+
+            bird.velocity = bird.flapStrength;
+        }
+
+        function update() {
+            frame++;
+
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+            bird.rotation = Math.min(1.1, Math.max(-0.5, bird.velocity * 0.08));
+
+            const speed = Math.min(4.4, 2.7 + score * 0.07);
+
+            for (const pillar of pillars) {
+                pillar.x -= speed;
+
+                if (!pillar.scored && pillar.x + pillar.width < bird.x) {
+                    pillar.scored = true;
+                    score++;
+
+                    if (score > best) {
+                        best = score;
+                        saveBest();
+                    }
+                }
+
+                const birdLeft = bird.x - bird.radius;
+                const birdRight = bird.x + bird.radius;
+                const birdTop = bird.y - bird.radius;
+                const birdBottom = bird.y + bird.radius;
+
+                const horizontalOverlap =
+                    birdRight > pillar.x &&
+                    birdLeft < pillar.x + pillar.width;
+
+                const outsideGap =
+                    birdTop < pillar.gapY ||
+                    birdBottom > pillar.gapY + pillar.gap;
+
+                if (horizontalOverlap && outsideGap) {
+                    endGame();
+                    return;
+                }
+            }
+
+            pillars = pillars.filter(pillar => pillar.x + pillar.width > -10);
+
+            if (
+                pillars.length === 0 ||
+                pillars[pillars.length - 1].x < W - 190
+            ) {
+                addPillar(W + 10);
+            }
+
+            if (
+                bird.y - bird.radius < 0 ||
+                bird.y + bird.radius > H - groundHeight
+            ) {
+                endGame();
+            }
+        }
+
+        function drawBackground() {
+            const sky = ctx.createLinearGradient(0, 0, 0, H);
+            sky.addColorStop(0, "#7dd3fc");
+            sky.addColorStop(1, "#dbeafe");
+
+            ctx.fillStyle = sky;
+            ctx.fillRect(0, 0, W, H);
+
+            drawCloud(65, 95, 1);
+            drawCloud(290, 170, 0.8);
+            drawCloud(175, 310, 0.65);
+
+            ctx.fillStyle = "#86efac";
+            ctx.beginPath();
+            ctx.moveTo(0, H - groundHeight - 30);
+
+            for (let x = 0; x <= W; x += 20) {
+                ctx.lineTo(
+                    x,
+                    H - groundHeight - 30 +
+                    Math.sin(x * 0.025 + frame * 0.01) * 9
+                );
+            }
+
+            ctx.lineTo(W, H);
+            ctx.lineTo(0, H);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "#65a30d";
+            ctx.fillRect(0, H - groundHeight, W, groundHeight);
+
+            ctx.fillStyle = "#a3e635";
+            ctx.fillRect(0, H - groundHeight, W, 9);
+
+            ctx.fillStyle = "#4d7c0f";
+
+            for (let x = -20; x < W + 20; x += 30) {
+                const offset = (frame * 2) % 30;
+                ctx.fillRect(x - offset, H - groundHeight + 22, 12, 4);
+            }
+        }
+
+        function drawCloud(x, y, scale) {
+            ctx.fillStyle = "rgba(255,255,255,0.8)";
+            ctx.beginPath();
+            ctx.arc(x, y, 17 * scale, 0, Math.PI * 2);
+            ctx.arc(x + 20 * scale, y - 8 * scale, 23 * scale, 0, Math.PI * 2);
+            ctx.arc(x + 43 * scale, y, 17 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawPillars() {
+            for (const pillar of pillars) {
+                const bottomY = pillar.gapY + pillar.gap;
+
+                drawPillar(pillar.x, 0, pillar.width, pillar.gapY);
+                drawPillar(
+                    pillar.x,
+                    bottomY,
+                    pillar.width,
+                    H - groundHeight - bottomY
+                );
+            }
+        }
+
+        function drawPillar(x, y, width, height) {
+            ctx.fillStyle = "#15803d";
+            ctx.fillRect(x, y, width, height);
+
+            ctx.fillStyle = "#22c55e";
+            ctx.fillRect(x + 7, y, 12, height);
+
+            ctx.fillStyle = "#166534";
+            ctx.fillRect(x + width - 9, y, 9, height);
+
+            ctx.fillStyle = "#16a34a";
+
+            if (height > 0) {
+                const capHeight = 15;
+                ctx.fillRect(x - 5, y + (y === 0 ? height - capHeight : 0), width + 10, capHeight);
+            }
+
+            ctx.strokeStyle = "#14532d";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, width, height);
+        }
+
+        function drawBird() {
+            ctx.save();
+            ctx.translate(bird.x, bird.y);
+            ctx.rotate(bird.rotation);
+
+            ctx.fillStyle = "#facc15";
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 17, 13, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#fef08a";
+            ctx.beginPath();
+            ctx.ellipse(-4, 4, 9, 6, -0.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#f97316";
+            ctx.beginPath();
+            ctx.moveTo(13, -2);
+            ctx.lineTo(25, 2);
+            ctx.lineTo(13, 6);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "white";
+            ctx.beginPath();
+            ctx.arc(7, -7, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#1f2937";
+            ctx.beginPath();
+            ctx.arc(9, -7, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawScore() {
+            ctx.textAlign = "center";
+            ctx.font = "bold 38px Arial";
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = "rgba(15,23,42,0.25)";
+            ctx.strokeText(score, W / 2, 58);
+
+            ctx.fillStyle = "white";
+            ctx.fillText(score, W / 2, 58);
+
+            ctx.textAlign = "left";
+            ctx.font = "bold 14px Arial";
+            ctx.fillStyle = "#0f172a";
+            ctx.fillText(`BEST ${best}`, 14, 27);
+        }
+
+        function drawOverlay(title, subtitle) {
+            ctx.fillStyle = "rgba(15,23,42,0.58)";
+            ctx.fillRect(0, 0, W, H);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "white";
+            ctx.font = "bold 32px Arial";
+            ctx.fillText(title, W / 2, H / 2 - 30);
+
+            ctx.font = "18px Arial";
+            ctx.fillText(subtitle, W / 2, H / 2 + 8);
+
+            ctx.font = "15px Arial";
+            ctx.fillText("Tap or press Space to play", W / 2, H / 2 + 42);
+        }
+
+        function draw() {
+            drawBackground();
+            drawPillars();
+            drawBird();
+            drawScore();
+
+            if (!started) {
+                drawOverlay("SKY GLIDER", "Ready for takeoff?");
+            } else if (gameOver) {
+                drawOverlay("GAME OVER", `Score: ${score}`);
+            }
+        }
+
+        function gameLoop() {
+            if (running) {
+                update();
+            }
+
+            draw();
+
+            if (running) {
+                animationId = requestAnimationFrame(gameLoop);
+            } else {
+                animationId = null;
+            }
+        }
+
+        function endGame() {
+            running = false;
+            gameOver = true;
+            draw();
+        }
+
+        canvas.addEventListener("pointerdown", event => {
+            event.preventDefault();
+            flap();
+        });
+
+        document.addEventListener("keydown", event => {
+            if (event.code === "Space" && !event.repeat) {
+                event.preventDefault();
+                flap();
+            }
+        });
+
+        startButton.addEventListener("click", resetGame);
+
+        draw();
+    </script>
+</body>
+</html>
